@@ -1,0 +1,21 @@
+# CT-04: o detalhe mostra nome, preço e descrição do produto escolhido.
+appId: com.esternevess.lojademo
+name: CT-04 - Detalhe do produto
+tags:
+  - produtos
+---
+- runFlow: comum/entrar.yaml
+
+- tapOn:
+    id: "produto-3"
+
+- assertVisible:
+    id: "detalhe-nome"
+    text: "Fone Bluetooth"
+# O cifrão tem significado especial na expressão regular que o Maestro usa
+# para comparar texto; por isso a verificação ignora o prefixo "R$".
+- assertVisible:
+    id: "detalhe-preco"
+    text: ".*249,00"
+- assertVisible:
+    id: "detalhe-descricao"

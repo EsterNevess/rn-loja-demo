@@ -1,0 +1,25 @@
+# Subfluxo reaproveitado: abre o app do zero e faz login com a conta de demonstração.
+#
+# `clearState` apaga os dados do app antes de abrir. Sem isso, um cenário que
+# faz login deixa a sessão ativa e o seguinte começa de um lugar diferente do
+# esperado, e a suíte passa a depender da ordem de execução.
+appId: com.esternevess.lojademo
+---
+- launchApp:
+    clearState: true
+
+- tapOn:
+    id: "campo-email"
+- inputText: "usuario@exemplo.com"
+
+- tapOn:
+    id: "campo-senha"
+- inputText: "senha123"
+
+- hideKeyboard
+- tapOn:
+    id: "botao-entrar"
+
+# Confirma que chegou na lista antes de devolver o controle ao fluxo que chamou.
+- assertVisible:
+    id: "produto-1"

@@ -1,0 +1,13 @@
+# CT-01: login com credenciais válidas leva à lista de produtos.
+appId: com.esternevess.lojademo
+name: CT-01 - Login com credenciais validas
+tags:
+  - login
+  - smoke
+---
+- runFlow: comum/entrar.yaml
+
+# Carrinho começa vazio e os seis produtos aparecem.
+- assertVisible: "Carrinho: 0"
+- assertVisible:
+    id: "produto-6"

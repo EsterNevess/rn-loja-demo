@@ -1,0 +1,29 @@
+# CT-02: senha incorreta é recusada com mensagem clara.
+# Caminho negativo: testar só o caminho feliz esconde o tipo de falha
+# que mais chega ao usuário final.
+appId: com.esternevess.lojademo
+name: CT-02 - Login com senha incorreta
+tags:
+  - login
+---
+- launchApp:
+    clearState: true
+
+- tapOn:
+    id: "campo-email"
+- inputText: "usuario@exemplo.com"
+
+- tapOn:
+    id: "campo-senha"
+- inputText: "senha_errada"
+
+- hideKeyboard
+- tapOn:
+    id: "botao-entrar"
+
+# Continua na tela de login, com o erro visível.
+- assertVisible:
+    id: "mensagem-erro"
+    text: "E-mail ou senha incorretos."
+- assertNotVisible:
+    id: "produto-1"

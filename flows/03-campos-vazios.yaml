@@ -1,0 +1,15 @@
+# CT-03: tentar entrar sem preencher nada pede o e-mail primeiro.
+appId: com.esternevess.lojademo
+name: CT-03 - Login com campos vazios
+tags:
+  - login
+---
+- launchApp:
+    clearState: true
+
+- tapOn:
+    id: "botao-entrar"
+
+- assertVisible:
+    id: "mensagem-erro"
+    text: "Informe o e-mail."

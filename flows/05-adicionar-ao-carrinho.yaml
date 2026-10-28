@@ -1,0 +1,21 @@
+# CT-05: adicionar um produto atualiza o contador do carrinho.
+appId: com.esternevess.lojademo
+name: CT-05 - Adicionar produto ao carrinho
+tags:
+  - carrinho
+  - smoke
+---
+- runFlow: comum/entrar.yaml
+
+- assertVisible: "Carrinho: 0"
+
+- tapOn:
+    id: "produto-1"
+- tapOn:
+    id: "botao-adicionar"
+- assertVisible:
+    id: "mensagem-adicionado"
+
+# Volta à lista: o contador precisa refletir o item adicionado.
+- back
+- assertVisible: "Carrinho: 1"

@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Uma execução nova cancela a anterior da mesma branch: o emulador é caro
+# e o resultado de um commit já superado não interessa a ninguém.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------ 1. unitários
+  unitarios:
+    name: Testes unitários
+    # Versão fixa, não "latest": o rótulo latest muda de distribuição sem aviso
+    # e leva junto o suporte das ferramentas.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar os testes
+        run: npm test -- --ci
+
+  # ----------------------------------------------------------------- 2. APK
+  apk:
+    name: Compilar o APK
+    needs: unitarios
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # A pasta android/ não é versionada: é gerada a partir do app.json.
+      # Assim o repositório guarda só o que foi escrito, e não código gerado.
+      - name: Gerar o projeto Android
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: "1"
+
+      - name: Aceitar as licenças do SDK Android
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Reaproveitar o cache do Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json', 'app.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # Versão release: embute o JavaScript no APK, então o app roda sozinho,
+      # sem servidor de desenvolvimento. Só a arquitetura x86_64, a do emulador.
+      - name: Compilar
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+
+      - name: Guardar o APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ 3. Maestro
+  maestro:
+    name: Testes no emulador (Maestro)
+    needs: apk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: apk
+
+      # O emulador precisa de virtualização por hardware. Sem isso ele sobe
+      # por software e fica lento a ponto de estourar o tempo limite.
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar o Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+
+      - name: Subir o emulador e rodar os fluxos
+        id: testes
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          script: |
+            adb install -r apk/app-release.apk
+            maestro test flows/ --format junit --output resultado.xml --debug-output saida-maestro
+
+      # O JUnit do Maestro diz o que falhou; a pasta de depuração mostra.
+      - name: Converter o resultado para o Allure
+        if: always()
+        run: python3 scripts/junit_para_allure.py resultado.xml saida-maestro allure-results
+
+      - name: Recuperar o histórico do Allure
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Preservar o histórico
+        if: always()
+        run: |
+          mkdir -p allure-results
+          if [ -d gh-pages/history ]; then
+            cp -r gh-pages/history allure-results/
+            echo "Histórico recuperado"
+          else
+            echo "Sem histórico anterior (primeira execução)"
+          fi
+
+      - name: Instalar o Allure
+        if: always()
+        run: npm install -g allure-commandline --silent
+
+      - name: Gerar o relatório
+        if: always()
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: Publicar o relatório no GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-report
+
+      - name: Guardar resultado e evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultado-maestro
+          path: |
+            resultado.xml
+            saida-maestro/
+          if-no-files-found: ignore
+
+      # O passo dos testes tem continue-on-error para que o relatório seja
+      # publicado mesmo com falha. Este devolve o resultado real ao job,
+      # para que o selo do README não minta.
+      - name: Refletir o resultado dos fluxos
+        if: steps.testes.outcome == 'failure'
+        run: |
+          echo "Algum fluxo falhou. Veja o relatório publicado e o artefato."
+          exit 1
